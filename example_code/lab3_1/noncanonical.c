@@ -70,7 +70,7 @@ int main(int argc, char** argv)
 
     while (STOP==FALSE) {       /* loop for input */
         res = read(fd,buf,255);   /* returns after 5 chars have been input */
-        buf[res]=0;               /* so we can printf... */
+        buf[res]='\0';               /* so we can printf... */
         printf(":%x%x%x%x%x:%d\n", buf[0], buf[1], buf[2], buf[3], buf[4], res);
         if (buf[0]=='z') STOP=TRUE;
     }
