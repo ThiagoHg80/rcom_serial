@@ -10,3 +10,6 @@ lab3_1_receiver:
 
 lab3_1_5_receiver:
 	gcc -o bin/readnoncanonical_5 example_code/lab3_1/noncanonical.c
+
+milestone_1:
+	gcc -o bin/conn_sm milestones/connection_state_machine.c
