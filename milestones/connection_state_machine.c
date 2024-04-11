@@ -75,22 +75,23 @@ int main(int argc, char** argv)
 
     printf("New termios structure set\n");
 
+    /* Protocol Implementation starts here */
+    int state = 1;
+
     /*
      * If the mode (argv[2]) is "write":
      * Send the message
      */
     if(strcmp("write",argv[2]) == 0) {
         buf[0] = FLAG;
-        buf[1] = SET;
-        buf[2] = 0x01;
+        buf[1] = 0x01;
+        buf[2] = SET;
         buf[3] = buf[1]^buf[2];
         buf[4] = FLAG;
         res = write(fd,buf,5);
         printf("%d bytes written\n", res);
     }
 
-    /* Protocol Implementation starts here */
-    
     /* State Machine
      * 0 STOP
      * 1 Start
@@ -99,8 +100,6 @@ int main(int argc, char** argv)
      * 4 C_RCV
      * 5 BCC OK
      */
-    
-    int state = 1;
     while(state) {
         res = read(fd,buf,1); 
         switch(state) {
@@ -115,7 +114,7 @@ int main(int argc, char** argv)
                 printf("%d:%02x\n",state,buf[1]);
                 if(buf[1] == 0x01)
                     state = 3;
-                else if(buf[0] == FLAG)
+                else if(buf[1] == FLAG)
                     state = 2;
                 else
                     state = 1;
