@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define BAUDRATE B9600
 #define MODEMDEVICE "/dev/ttyS1"
@@ -78,8 +79,6 @@ int main(int argc, char** argv)
     printf("New termios structure set\n");
 
     /* Protocol Implementation starts here */
-    int state = 1;
-
     /*
      * If the mode (argv[2]) is "write":
      * Send the message
@@ -91,7 +90,7 @@ int main(int argc, char** argv)
         buf[3] = buf[1]^buf[2];
         buf[4] = FLAG;
         res = write(fd,buf,5);
-        printf("%d bytes written\n", res);
+        printf("%d bytes written: %02x %02x %02x %02x %02x\n", res, buf[0], buf[1], buf[2], buf[3], buf[4]);
     }
 
     /* State Machine
@@ -102,17 +101,17 @@ int main(int argc, char** argv)
      * 4 C_RCV
      * 5 BCC OK
      */
+    int state = 1;
     while(state) {
-        res = read(fd,buf,1); 
         switch(state) {
             case 1:
-                res = read(fd,buf[0],1); 
+                res = read(fd,&buf[0],1); 
                 printf("%d:%02x\n",state,buf[0]);
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,buf[1],1); 
+                res = read(fd,&buf[1],1); 
                 printf("%d:%02x\n",state,buf[1]);
                 if(buf[1] == 0x01)
                     state = 3;
@@ -122,7 +121,7 @@ int main(int argc, char** argv)
                     state = 1;
             break;
             case 3:
-                res = read(fd,buf,1); 
+                res = read(fd,&buf[2],1); 
                 printf("%d:%02x\n",state,buf[2]);
                 if(buf[2] == SET || buf[2] == UA)
                     state = 4;
@@ -132,7 +131,7 @@ int main(int argc, char** argv)
                     state = 1;
             break;
             case 4:
-                res = read(fd,buf[3],1); 
+                res = read(fd,&buf[3],1); 
                 printf("%d:%02x\n",state,buf[3]);
                 if(buf[3] == buf[2]^buf[1])
                     state = 5;
@@ -142,22 +141,26 @@ int main(int argc, char** argv)
                     state = 1;
             break;
             case 5:
-                res = read(fd,buf[4],1); 
+                res = read(fd,&buf[4],1); 
                 printf("%d:%02x\n",state,buf[4]);
-                if(buf[4] == FLAG)
+                if(buf[4] == FLAG) {
+                    if(buf[2] == SET) { // Answer SET with UA
+                        buf[0] = FLAG;
+                        buf[1] = 0x01;
+                        buf[2] = UA;
+                        buf[3] = buf[1]^buf[2];
+                        buf[4] = FLAG;
+                        res = write(fd,buf,5);
+                        printf("%d bytes written: %02x %02x %02x %02x %02x\n", res, buf[0], buf[1], buf[2], buf[3], buf[4]);
+                    }
                     state = 0;
+                }
                 else
                     state = 1;
             break;
         }
     }
     /* Protocol Implementation ends here */
-
-    /*
-    O ciclo FOR e as instruções seguintes devem ser alterados de modo a respeitar
-    o indicado no guião
-    */
-
 
     if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
         perror("tcsetattr");
