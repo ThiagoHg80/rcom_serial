@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define BAUDRATE B9600
 #define MODEMDEVICE "/dev/ttyS1"
@@ -25,12 +27,12 @@ int main(int argc, char** argv)
     unsigned char buf[255];
     int i, sum = 0, speed = 0;
 
-    if ( (argc < 3) ||
-         ((strcmp("/dev/ttyS0", argv[1])!=0) &&
-          (strcmp("/dev/ttyS1", argv[1])!=0) &&
-          (strcmp("/dev/ttyS5", argv[1])!=0)) ||
-         ((strcmp("write",argv[2])!=0) && 
-          (strcmp("recv",argv[2])!=0))) {
+    if(
+        (argc != 3) ||
+        strncmp("/dev/ttyS", argv[1], 9) != 0 ||
+        strspn(argv[1] + 9, "0123456789") != strlen(argv[1] + 9) ||     // Match [0-9]+$ after /dev/ttyS
+        ((strcmp("write", argv[2]) != 0 && strcmp("recv", argv[2]) != 0))
+    ) {
         printf("Usage:\tnserial SerialPort mode\n\tex: nserial /dev/ttyS1 write\n");
         exit(1);
     }
@@ -104,7 +106,7 @@ int main(int argc, char** argv)
         res = read(fd,buf,1); 
         switch(state) {
             case 1:
-                res = read(fd,buf,1); 
+                res = read(fd,buf[0],1); 
                 printf("%d:%02x\n",state,buf[0]);
                 if(buf[0] == FLAG)
                     state = 2;
