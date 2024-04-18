@@ -90,7 +90,7 @@ int main(int argc, char** argv)
         buf[3] = buf[1]^buf[2];
         buf[4] = FLAG;
         res = write(fd,buf,5);
-        printf("%d bytes written: %02x %02x %02x %02x %02x\n", res, buf[0], buf[1], buf[2], buf[3], buf[4]);
+        printf("state 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\n", buf[0], buf[1], buf[2], buf[3], buf[4]);
     }
 
     /* State Machine
@@ -106,13 +106,13 @@ int main(int argc, char** argv)
         switch(state) {
             case 1:
                 res = read(fd,&buf[0],1); 
-                printf("%d:%02x\n",state,buf[0]);
+                printf("state %d : recv %02x\n",state,buf[0]);
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
                 res = read(fd,&buf[1],1); 
-                printf("%d:%02x\n",state,buf[1]);
+                printf("state %d : recv %02x\n",state,buf[1]);
                 if(buf[1] == 0x01)
                     state = 3;
                 else if(buf[1] == FLAG)
@@ -122,7 +122,7 @@ int main(int argc, char** argv)
             break;
             case 3:
                 res = read(fd,&buf[2],1); 
-                printf("%d:%02x\n",state,buf[2]);
+                printf("state %d : recv %02x\n",state,buf[2]);
                 if(buf[2] == SET || buf[2] == UA)
                     state = 4;
                 else if(buf[2] == FLAG)
@@ -132,7 +132,7 @@ int main(int argc, char** argv)
             break;
             case 4:
                 res = read(fd,&buf[3],1); 
-                printf("%d:%02x\n",state,buf[3]);
+                printf("state %d : recv %02x\n",state,buf[3]);
                 if(buf[3] == buf[2]^buf[1])
                     state = 5;
                 else if(buf[3] == FLAG)
@@ -142,7 +142,7 @@ int main(int argc, char** argv)
             break;
             case 5:
                 res = read(fd,&buf[4],1); 
-                printf("%d:%02x\n",state,buf[4]);
+                printf("state %d : recv %02x\n",state,buf[4]);
                 if(buf[4] == FLAG) {
                     if(buf[2] == SET) { // Answer SET with UA
                         buf[0] = FLAG;
@@ -151,7 +151,7 @@ int main(int argc, char** argv)
                         buf[3] = buf[1]^buf[2];
                         buf[4] = FLAG;
                         res = write(fd,buf,5);
-                        printf("%d bytes written: %02x %02x %02x %02x %02x\n", res, buf[0], buf[1], buf[2], buf[3], buf[4]);
+                        printf("state 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\n", buf[0], buf[1], buf[2], buf[3], buf[4]);
                     }
                     state = 0;
                 }
