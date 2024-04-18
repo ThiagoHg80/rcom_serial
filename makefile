@@ -13,3 +13,6 @@ lab3_1_5_receiver:
 
 milestone_1:
 	gcc -o bin/conn_sm milestones/connection_state_machine.c
+
+example_app:
+	gcc -o bin/app linklayer.c linklayer.h example_app.c 
