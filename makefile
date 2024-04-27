@@ -15,4 +15,4 @@ milestone_1:
 	gcc -o bin/conn_sm milestones/connection_state_machine.c
 
 example_app:
-	gcc -o bin/app linklayer.c linklayer.h example_app.c 
+	gcc -o bin/app -D linklayer.h linklayer.c example_app.c

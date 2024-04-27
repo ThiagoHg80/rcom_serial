@@ -1,5 +1,9 @@
 #include "linklayer.h"
 
+#ifndef DEBUG
+#define DEBUG 1 
+#endif
+
 #define FLAG 0x5c
 #define SET  0x07
 #define UA   0x06
@@ -9,12 +13,16 @@
  * create a global variable for it
  * Given that: This API can't handle two open connections at the same time 
  */
-int fd;
+static int fd;
+static struct termios oldtio,newtio;
 
 // Opens a conection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters) {
+    #if DEBUG 
+        printf("[linklayer] llopen() opening socket\n");
+    #endif
+    
     int c, res;
-    struct termios oldtio,newtio;
     unsigned char buf[255];
     int i, sum = 0, speed = 0;
     
@@ -48,6 +56,13 @@ int llopen(linkLayer connectionParameters) {
         buf[3] = buf[1]^buf[2];
         buf[4] = FLAG;
         res = write(fd,buf,5);
+        #if DEBUG
+            printf("            state 1 : recv %02x\n",buf[0]);
+            printf("            state 1 : recv %02x\n",buf[1]);
+            printf("            state 1 : recv %02x\n",buf[2]);
+            printf("            state 1 : recv %02x\n",buf[3]);
+            printf("            state 1 : recv %02x\n",buf[4]);
+        #endif
     }
     
    /* State Machine
@@ -62,14 +77,18 @@ int llopen(linkLayer connectionParameters) {
     while(state) {
         switch(state) {
             case 1:
-                res = read(fd,&buf[0],1); 
-                printf("state %d : recv %02x\n",state,buf[0]);
+                res = read(fd,&buf[0],1);
+                #if DEBUG 
+                    printf("            state %d : recv %02x\n",state,buf[0]);
+                #endif
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
                 res = read(fd,&buf[1],1); 
-                printf("state %d : recv %02x\n",state,buf[1]);
+                #if DEBUG 
+                    printf("            state %d : recv %02x\n",state,buf[1]);
+                #endif
                 if(buf[1] == 0x01)
                     state = 3;
                 else if(buf[1] == FLAG)
@@ -79,7 +98,9 @@ int llopen(linkLayer connectionParameters) {
             break;
             case 3:
                 res = read(fd,&buf[2],1); 
-                printf("state %d : recv %02x\n",state,buf[2]);
+                #if DEBUG 
+                    printf("            state %d : recv %02x\n",state,buf[2]);
+                #endif
                 if(buf[2] == SET || buf[2] == UA)
                     state = 4;
                 else if(buf[2] == FLAG)
@@ -89,7 +110,9 @@ int llopen(linkLayer connectionParameters) {
             break;
             case 4:
                 res = read(fd,&buf[3],1); 
-                printf("state %d : recv %02x\n",state,buf[3]);
+                #if DEBUG 
+                    printf("            state %d : recv %02x\n",state,buf[3]);
+                #endif
                 if(buf[3] == buf[2]^buf[1])
                     state = 5;
                 else if(buf[3] == FLAG)
@@ -99,7 +122,9 @@ int llopen(linkLayer connectionParameters) {
             break;
             case 5:
                 res = read(fd,&buf[4],1); 
-                printf("state %d : recv %02x\n",state,buf[4]);
+                #if DEBUG 
+                    printf("            state %d : recv %02x\n",state,buf[4]);
+                #endif
                 if(buf[4] == FLAG) {
                     if(buf[2] == SET) { // Answer SET with UA
                         buf[0] = FLAG;
@@ -108,7 +133,13 @@ int llopen(linkLayer connectionParameters) {
                         buf[3] = buf[1]^buf[2];
                         buf[4] = FLAG;
                         res = write(fd,buf,5);
-                        printf("state 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\nstate 1 : sent %02x\n", buf[0], buf[1], buf[2], buf[3], buf[4]);
+                        #if DEBUG
+                            printf("            state 1 : recv %02x\n",buf[0]);
+                            printf("            state 1 : recv %02x\n",buf[1]);
+                            printf("            state 1 : recv %02x\n",buf[2]);
+                            printf("            state 1 : recv %02x\n",buf[3]);
+                            printf("            state 1 : recv %02x\n",buf[4]);
+                        #endif
                     }
                     state = 0;
                 }
@@ -118,7 +149,7 @@ int llopen(linkLayer connectionParameters) {
         }
     }
 
-    return fd;
+    return 1;
 }
 
 // Sends data in buf with size bufSize
@@ -133,5 +164,13 @@ int llread(unsigned char* packet) {
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
 int llclose(linkLayer connectionParameters, int showStatistics) {
-
+    #if DEBUG 
+        printf("[linklayer] llclose() closing socket\n");
+    #endif 
+    if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+    close(fd);
+    return 1;
 };

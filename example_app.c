@@ -12,15 +12,13 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-
-    int fd;
     struct linkLayer ll_cfg;
     strcpy(ll_cfg.serialPort, argv[1]);
     ll_cfg.role = strcmp("w", argv[2]) == 0 ? 0 : 1;
     ll_cfg.baudRate = 9600;
 
-    fd = llopen(ll_cfg);
+    llopen(ll_cfg);
 
-
+    llclose(ll_cfg, 0);
 }
 
