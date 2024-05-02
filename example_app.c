@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
     ll_cfg.baudRate = 9600;
 
     llopen(ll_cfg);
-
+    sleep(1);
     llclose(ll_cfg, 0);
 }
 

@@ -1,12 +1,20 @@
 #include "linklayer.h"
 
 #ifndef DEBUG
-#define DEBUG 1 
+#define DEBUG 1
 #endif
 
 #define FLAG 0x5c
 #define SET  0x07
+#define DISC 0x0a
 #define UA   0x06
+#define ESC  0x5d
+#define RR_0 0x01
+#define RR_1 0x11
+#define REJ_0 0x05
+#define REJ_1 0x15
+#define I_0  0x80
+#define I_1  0xc0
 
 /*
  * File Descriptor is not present on struct linklayer {}, so we have to 
@@ -22,10 +30,9 @@ int llopen(linkLayer connectionParameters) {
         printf("[linklayer] llopen() opening socket\n");
     #endif
     
-    int c, res;
-    unsigned char buf[255];
-    int i, sum = 0, speed = 0;
-    
+    int res;
+    unsigned char buf[5];
+
     fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
     if (fd < 0) { perror(connectionParameters.serialPort); exit(-1); }
     if ( tcgetattr(fd,&oldtio) == -1) { /* save current port settings */
@@ -57,11 +64,7 @@ int llopen(linkLayer connectionParameters) {
         buf[4] = FLAG;
         res = write(fd,buf,5);
         #if DEBUG
-            printf("            state 1 : recv %02x\n",buf[0]);
-            printf("            state 1 : recv %02x\n",buf[1]);
-            printf("            state 1 : recv %02x\n",buf[2]);
-            printf("            state 1 : recv %02x\n",buf[3]);
-            printf("            state 1 : recv %02x\n",buf[4]);
+            printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
         #endif
     }
     
@@ -79,7 +82,7 @@ int llopen(linkLayer connectionParameters) {
             case 1:
                 res = read(fd,&buf[0],1);
                 #if DEBUG 
-                    printf("            state %d : recv %02x\n",state,buf[0]);
+                    printf("            [%d] <-- %02x\n",state,buf[0]);
                 #endif
                 if(buf[0] == FLAG)
                     state = 2;
@@ -87,7 +90,7 @@ int llopen(linkLayer connectionParameters) {
             case 2:
                 res = read(fd,&buf[1],1); 
                 #if DEBUG 
-                    printf("            state %d : recv %02x\n",state,buf[1]);
+                    printf("            [%d] <-- %02x\n",state,buf[1]);
                 #endif
                 if(buf[1] == 0x01)
                     state = 3;
@@ -99,7 +102,7 @@ int llopen(linkLayer connectionParameters) {
             case 3:
                 res = read(fd,&buf[2],1); 
                 #if DEBUG 
-                    printf("            state %d : recv %02x\n",state,buf[2]);
+                    printf("            [%d] <-- %02x\n",state,buf[2]);
                 #endif
                 if(buf[2] == SET || buf[2] == UA)
                     state = 4;
@@ -111,7 +114,7 @@ int llopen(linkLayer connectionParameters) {
             case 4:
                 res = read(fd,&buf[3],1); 
                 #if DEBUG 
-                    printf("            state %d : recv %02x\n",state,buf[3]);
+                    printf("            [%d] <-- %02x\n",state,buf[3]);
                 #endif
                 if(buf[3] == buf[2]^buf[1])
                     state = 5;
@@ -123,7 +126,7 @@ int llopen(linkLayer connectionParameters) {
             case 5:
                 res = read(fd,&buf[4],1); 
                 #if DEBUG 
-                    printf("            state %d : recv %02x\n",state,buf[4]);
+                    printf("            [%d] <-- %02x\n",state,buf[4]);
                 #endif
                 if(buf[4] == FLAG) {
                     if(buf[2] == SET) { // Answer SET with UA
@@ -134,11 +137,7 @@ int llopen(linkLayer connectionParameters) {
                         buf[4] = FLAG;
                         res = write(fd,buf,5);
                         #if DEBUG
-                            printf("            state 1 : recv %02x\n",buf[0]);
-                            printf("            state 1 : recv %02x\n",buf[1]);
-                            printf("            state 1 : recv %02x\n",buf[2]);
-                            printf("            state 1 : recv %02x\n",buf[3]);
-                            printf("            state 1 : recv %02x\n",buf[4]);
+                            printf("            [5] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
                         #endif
                     }
                     state = 0;
@@ -159,14 +158,185 @@ int llwrite(unsigned char* buf, int bufSize) {
 
 // Receive data in packet
 int llread(unsigned char* packet) {
+    int res;
+    size_t n_data_buf = 0;
+    unsigned char buf[5], data_buf[256];
 
+    int state = 1;
+    while(state) {
+        switch(state) {
+            case 1:
+                res = read(fd,&buf[0],1);
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[0]);
+                #endif
+                if(buf[0] == FLAG)
+                    state = 2;
+            break;
+            case 2:
+                res = read(fd,&buf[1],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[1]);
+                #endif
+                if(buf[1] == 0x01)
+                    state = 3;
+                else if(buf[1] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 3:
+                res = read(fd,&buf[2],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[2]);
+                #endif
+                if(buf[2] == I_0 | buf[2] == I_1)
+                    state = 4;
+                else if(buf[2] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 4:
+                res = read(fd,&buf[3],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[3]);
+                #endif
+                if(buf[3] == buf[2]^buf[1])
+                    state = 5;
+                else if(buf[3] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 5:
+                res = read(fd,&buf[4],1);
+                #if DEBUG
+                    printf("%02x ",state,buf[4]);
+                #endif
+                if(buf[4] == FLAG) {
+                    state = 6;
+                    n_data_buf--;
+                    break;
+                }
+
+                data_buf[n_data_buf] = buf[4];
+                n_data_buf++;
+            break;
+            case 6:
+                unsigned char bcc2_local = 0;
+                for(int i = 0; i < n_data_buf; i++) {
+                    bcc2_local = bcc2_local ^ data_buf[i];
+                }
+                if(data_buf[n_data_buf] == bcc2_local) {
+                    buf[0] = FLAG;
+                    buf[1] = 0x01;
+                    buf[2] = buf[2] == I_0 ? RR_0 : RR_1;
+                    buf[3] = buf[1]^buf[2];
+                    buf[4] = FLAG;
+                    res = write(fd,buf,5);
+                    #if DEBUG
+                        printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
+                    #endif
+                    state = 0;
+                }
+            break;
+        }
+    }
+
+    return 1;
 };
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
 int llclose(linkLayer connectionParameters, int showStatistics) {
     #if DEBUG 
         printf("[linklayer] llclose() closing socket\n");
-    #endif 
+    #endif
+
+    int res; 
+    unsigned char buf[5];
+
+    if(connectionParameters.role == 0) {
+        buf[0] = FLAG;
+        buf[1] = 0x01;
+        buf[2] = DISC;
+        buf[3] = buf[1]^buf[2];
+        buf[4] = FLAG;
+        res = write(fd,buf,5);
+        #if DEBUG
+            printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
+        #endif
+    }
+
+    int state = 1;
+    while(state) {
+        switch(state) {
+            case 1:
+                res = read(fd,&buf[0],1);
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[0]);
+                #endif
+                if(buf[0] == FLAG)
+                    state = 2;
+            break;
+            case 2:
+                res = read(fd,&buf[1],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[1]);
+                #endif
+                if(buf[1] == 0x01)
+                    state = 3;
+                else if(buf[1] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 3:
+                res = read(fd,&buf[2],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[2]);
+                #endif
+                if(buf[2] == DISC || buf[2] == UA)
+                    state = 4;
+                else if(buf[2] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 4:
+                res = read(fd,&buf[3],1); 
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,buf[3]);
+                #endif
+                if(buf[3] == buf[2]^buf[1])
+                    state = 5;
+                else if(buf[3] == FLAG)
+                    state = 2;
+                else
+                    state = 1;
+            break;
+            case 5:
+                if(buf[2] == DISC) {
+                    buf[0] = FLAG;
+                    buf[1] = 0x01;
+                    buf[2] = connectionParameters.role == 0 ? UA : DISC;
+                    buf[3] = buf[1]^buf[2];
+                    buf[4] = FLAG;
+                    res = write(fd,buf,5);
+                    #if DEBUG
+                        printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
+                    #endif
+                    state = 1;
+                }
+
+                if(buf[2] == UA) { // sent or received UA
+                    state = 0;
+                }
+            break;
+        }
+    }
+
+
     if ( tcsetattr(fd,TCSANOW,&oldtio) == -1) {
         perror("tcsetattr");
         exit(-1);
