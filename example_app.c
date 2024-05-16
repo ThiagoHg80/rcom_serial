@@ -18,7 +18,20 @@ int main(int argc, char **argv) {
     ll_cfg.baudRate = 9600;
 
     llopen(ll_cfg);
-    sleep(1);
+    if(ll_cfg.role == 0) {
+        sleep(1);
+        unsigned char *buf = "very confidential data";
+        size_t buf_len = strlen(buf);
+        llwrite(buf,buf_len);
+    } else {
+        unsigned char packet[256];
+        llread(packet);
+        size_t packet_len = strlen(packet);
+        printf("%s\n",packet);
+    }
+
+    if(ll_cfg.role == 0)
+        sleep(1);
     llclose(ll_cfg, 0);
 }
 
