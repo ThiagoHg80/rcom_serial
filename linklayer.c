@@ -9,12 +9,18 @@
 #define DISC 0x0a
 #define UA   0x06
 #define ESC  0x5d
+#define ESC_XOR 0x20
 #define RR_0 0x01
 #define RR_1 0x11
 #define REJ_0 0x05
 #define REJ_1 0x15
+#define R_XOR 0x10
+
 #define I_0  0x80
 #define I_1  0xc0
+#define I_XOR 0x40
+
+#define FRAME_MAX_SIZE 1000
 
 /*
  * File Descriptor is not present on struct linklayer {}, so we have to 
@@ -159,85 +165,115 @@ int llwrite(unsigned char* buf, int bufSize) {
     #endif
     int res;
 
-    unsigned char bcc2 = 0;
-    for(int i = 0; i < bufSize; i++) {
-        bcc2 = bcc2 ^ buf[i];
-    }
+    // TODO: Implement FRAME into function?
+    int buf_position, frameSize;
+    unsigned char bcc2, frame[FRAME_MAX_SIZE];
+    // Frame
+    frame[0] = FLAG;
+    frame[1] = 0x01;
+    frame[2] = s ? I_1 : I_0;
+    frame[3] = frame[1]^frame[2];
 
-    unsigned char control_buf[5];
-    control_buf[0] = FLAG;
-    control_buf[1] = 0x01;
-    control_buf[2] = s ? I_1 : I_0;
-    control_buf[3] = buf[1]^buf[2];
-    control_buf[4] = FLAG;
+    buf_position = 0;
+    frameSize = 4;
+    bcc2 = 0;
+    for(; frameSize < FRAME_MAX_SIZE - 2; frameSize++) {
+        // The generation of BCC considers only the original octets (before stuffing)
+        bcc2 = bcc2 ^ buf[buf_position];
 
-    res = write(fd,control_buf,4);
-    res = write(fd,buf,bufSize);
-    res = write(fd,&bcc2,1);
-    res = write(fd,&control_buf[4],1);
-
-    #if DEBUG
-        printf("            [1] %02x %02x %02x %02x --> \n",control_buf[0],control_buf[1],control_buf[2],control_buf[3]);
-        for(int i = 0; i < bufSize; i++) {
-            printf("%02x ",buf[i]);
+        // Byte Stuffing
+        if(buf[buf_position] == FLAG || buf[buf_position] == ESC) {
+            // Check for the very specific case where you're escaping a character
+            // at position FRAME_MAX_SIZE - 3 (you only have ony byte left to use in the frame)
+            if(frameSize == FRAME_MAX_SIZE - 3) {
+                bcc2 = bcc2 ^ buf[buf_position]; // Remove octet from BCC
+                break;
+            }
+            frame[frameSize] = ESC;
+            frameSize++;
+            frame[frameSize] = buf[buf_position]^ESC_XOR;
         }
-        printf("\n            [1] %02x --> \n",control_buf[4]);
-    #endif
 
-    int state = 1;
+        frame[frameSize] = buf[buf_position];
+        buf_position++;
+    }
+    frame[frameSize] = bcc2;
+    frameSize++;
+    frame[frameSize] = FLAG;
+
+    int state = 11;
+    int rej_counter = 0;
+    
+    unsigned char control_buf[6];
     while(state) {
         sleep(0.1);
         switch(state) {
-            case 1:
-                res = read(fd,&buf[0],1);
-                #if DEBUG 
-                    printf("            [%d] <-- %02x\n",state,buf[0]);
+            case 11:
+                res = write(fd,frame,frameSize+1);
+                printf("            [1] sending %d bytes of data",frameSize + 1);
+                #if DEBUG
+                    printf("            [1] %02x %02x %02x %02x --> \n",frame[0],frame[1],frame[2],frame[3]);
+                    for(int i = 4; i < frameSize+1; i++) {
+                        printf("%02x ",frame[i]);
+                    }
+                    printf("\n");
                 #endif
-                if(buf[0] == FLAG)
+                rej_counter++;
+                if(rej_counter > 5) {
+                    state = 0;
+                } else {
+                    state = 1;
+                }
+            case 1:
+                res = read(fd,&control_buf[0],1);
+                #if DEBUG 
+                    printf("            [%d] <-- %02x\n",state,control_buf[0]);
+                #endif
+                if(control_buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1); 
+                res = read(fd,&control_buf[1],1); 
                 #if DEBUG 
-                    printf("            [%d] <-- %02x\n",state,buf[1]);
+                    printf("            [%d] <-- %02x\n",state,control_buf[1]);
                 #endif
-                if(buf[1] == 0x01)
+                if(control_buf[1] == 0x01)
                     state = 3;
-                else if(buf[1] == FLAG)
+                else if(control_buf[1] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1); 
+                res = read(fd,&control_buf[2],1); 
                 #if DEBUG 
-                    printf("            [%d] <-- %02x\n",state,buf[2]);
+                    printf("            [%d] <-- %02x\n",state,control_buf[2]);
                 #endif
-                if(buf[2] == (control_buf[2] == I_0 ? RR_0 : RR_1))
+                if(control_buf[2] == (frame[2] == I_0 ? RR_0 : RR_1))
                     state = 4;
-                else if(buf[2] == FLAG)
+                else if(control_buf[2] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1); 
+                res = read(fd,&control_buf[3],1); 
                 #if DEBUG 
-                    printf("            [%d] <-- %02x\n",state,buf[3]);
+                    printf("            [%d] <-- %02x\n",state,control_buf[3]);
                 #endif
-                if(buf[3] == buf[2]^buf[1])
+                if(control_buf[3] == control_buf[2]^control_buf[1])
                     state = 5;
-                else if(buf[3] == FLAG)
+                else if(control_buf[3] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 5:
-                res = read(fd,&buf[4],1); 
+                res = read(fd,&control_buf[4],1); 
                 #if DEBUG 
-                    printf("            [%d] <-- %02x\n",state,buf[4]);
+                    printf("            [%d] <-- %02x\n",state,control_buf[4]);
                 #endif
-                if(buf[4] == FLAG) {
+                if(control_buf[4] == FLAG) {
                     s = !s;
                     state = 0;
                 }
@@ -246,6 +282,8 @@ int llwrite(unsigned char* buf, int bufSize) {
             break;
         }
     }
+    
+    return 1;
 };
 
 // Receive data in packet
@@ -255,7 +293,7 @@ int llread(unsigned char* packet) {
     #endif
     int res;
     size_t n_data_buf = 0;
-    unsigned char buf[5], data_buf[256];
+    unsigned char buf[6], data_buf[FRAME_MAX_SIZE];
 
     int state = 1;
     while(state) {
@@ -311,7 +349,10 @@ int llread(unsigned char* packet) {
                     #if DEBUG
                         printf("%02x ",buf[4]);
                     #endif
-                    if(buf[4] == FLAG) {
+                    if(buf[4] == ESC) { // byte destuffing
+                        res = read(fd,&buf[5],1);
+                        buf[4] = buf[5]^ESC_XOR;
+                    } else if(buf[4] == FLAG) { // end-of-frame
                         state = 6;
                         n_data_buf--;
                         break;

@@ -16,3 +16,6 @@ milestone_1:
 
 example_app:
 	gcc -o bin/app -D linklayer.h linklayer.c example_app.c
+
+linklayer_object:
+	gcc -c linklayer.c -o linklayer.o
