@@ -1,13 +1,15 @@
-all: linklayer_obj cable app
+.PHONY: all
 
-linklayer_obj:
-	gcc ./protocol/linklayer.c ./protocol/linklayer.h -o ./protocol/linklayer.o
+all: build_linklayer_obj build_cable build_app
 
-cable:
+build_linklayer_obj: ./protocol/linklayer.c ./protocol/linklayer.h
+	gcc -c ./protocol/linklayer.c -o ./protocol/linklayer.o
+
+build_cable: ./cable/cable.c
 	gcc -w ./cable/cable.c -o ./bin/cable
 
-app:
+build_app: ./app/main.c build_linklayer_obj
 	gcc -w ./app/main.c ./protocol/*.o -o ./bin/main
 
 clean:
-	rm ./protocol/linklayer.o ./bin/cable ./bin/main
+	rm -f ./protocol/linklayer.o ./bin/cable ./bin/main

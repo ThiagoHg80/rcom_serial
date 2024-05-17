@@ -32,10 +32,10 @@ static struct termios oldtio,newtio;
 
 // Opens a conection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters) {
-    #if DEBUG 
+    #if DEBUG
         printf("[linklayer] llopen() opening socket\n");
     #endif
-    
+
     int res;
     unsigned char buf[5];
 
@@ -73,7 +73,7 @@ int llopen(linkLayer connectionParameters) {
             printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
         #endif
     }
-    
+
    /* State Machine
      * 0 STOP
      * 1 Start
@@ -88,15 +88,15 @@ int llopen(linkLayer connectionParameters) {
         switch(state) {
             case 1:
                 res = read(fd,&buf[0],1);
-                #if DEBUG 
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[0]);
                 #endif
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1); 
-                #if DEBUG 
+                res = read(fd,&buf[1],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[1]);
                 #endif
                 if(buf[1] == 0x01)
@@ -107,8 +107,8 @@ int llopen(linkLayer connectionParameters) {
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1); 
-                #if DEBUG 
+                res = read(fd,&buf[2],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[2]);
                 #endif
                 if(buf[2] == SET || buf[2] == UA)
@@ -119,8 +119,8 @@ int llopen(linkLayer connectionParameters) {
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1); 
-                #if DEBUG 
+                res = read(fd,&buf[3],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[3]);
                 #endif
                 if(buf[3] == buf[2]^buf[1])
@@ -131,8 +131,8 @@ int llopen(linkLayer connectionParameters) {
                     state = 1;
             break;
             case 5:
-                res = read(fd,&buf[4],1); 
-                #if DEBUG 
+                res = read(fd,&buf[4],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[4]);
                 #endif
                 if(buf[4] == FLAG) {
@@ -160,7 +160,7 @@ int llopen(linkLayer connectionParameters) {
 
 // Sends data in buf with size bufSize
 int llwrite(unsigned char* buf, int bufSize) {
-    #if DEBUG 
+    #if DEBUG
         printf("[linklayer] llwrite() write data to socket\n");
     #endif
     int res;
@@ -174,7 +174,7 @@ int llwrite(unsigned char* buf, int bufSize) {
     frame[2] = s ? I_1 : I_0;
     frame[3] = frame[1]^frame[2];
 
-    #if DEBUG 
+    #if DEBUG
         printf("            [1] parity %d\n",s);
     #endif
 
@@ -210,7 +210,7 @@ int llwrite(unsigned char* buf, int bufSize) {
 
     int state = 11;
     int rej_counter = 0;
-    
+
     unsigned char control_buf[6];
     while(state) {
         sleep(0.1);
@@ -233,15 +233,15 @@ int llwrite(unsigned char* buf, int bufSize) {
                 }
             case 1:
                 res = read(fd,&control_buf[0],1);
-                #if DEBUG 
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,control_buf[0]);
                 #endif
                 if(control_buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&control_buf[1],1); 
-                #if DEBUG 
+                res = read(fd,&control_buf[1],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,control_buf[1]);
                 #endif
                 if(control_buf[1] == 0x01)
@@ -252,8 +252,8 @@ int llwrite(unsigned char* buf, int bufSize) {
                     state = 1;
             break;
             case 3:
-                res = read(fd,&control_buf[2],1); 
-                #if DEBUG 
+                res = read(fd,&control_buf[2],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,control_buf[2]);
                 #endif
                 if(control_buf[2] == (frame[2] == I_0 ? RR_0 : RR_1)) {
@@ -261,7 +261,7 @@ int llwrite(unsigned char* buf, int bufSize) {
                 }
                 else if(control_buf[2] == REJ_0 || control_buf[2] == REJ_1) { // (frame[2] == I_0 ? REJ_0 : REJ_1) // Should this be used ?
                     state = 11; // Retransmission
-                    #if DEBUG 
+                    #if DEBUG
                         printf("            [%d] Retransmitting data\n",state);
                     #endif
                 } else if(control_buf[2] == FLAG) {
@@ -271,8 +271,8 @@ int llwrite(unsigned char* buf, int bufSize) {
                 }
             break;
             case 4:
-                res = read(fd,&control_buf[3],1); 
-                #if DEBUG 
+                res = read(fd,&control_buf[3],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,control_buf[3]);
                     printf("            [%d] received %02x and expected %02x\n",state,control_buf[3],control_buf[2]^control_buf[1]);
                 #endif
@@ -284,8 +284,8 @@ int llwrite(unsigned char* buf, int bufSize) {
                     state = 1;
             break;
             case 5:
-                res = read(fd,&control_buf[4],1); 
-                #if DEBUG 
+                res = read(fd,&control_buf[4],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,control_buf[4]);
                 #endif
                 if(control_buf[4] == FLAG) {
@@ -297,13 +297,13 @@ int llwrite(unsigned char* buf, int bufSize) {
             break;
         }
     }
-    
+
     return 1;
 };
 
 // Receive data in packet
 int llread(unsigned char* packet) {
-    #if DEBUG 
+    #if DEBUG
         printf("[linklayer] llread() reading socket data\n");
     #endif
     int res;
@@ -316,15 +316,15 @@ int llread(unsigned char* packet) {
         switch(state) {
             case 1:
                 res = read(fd,&buf[0],1);
-                #if DEBUG 
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[0]);
                 #endif
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1); 
-                #if DEBUG 
+                res = read(fd,&buf[1],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[1]);
                 #endif
                 if(buf[1] == 0x01)
@@ -335,8 +335,8 @@ int llread(unsigned char* packet) {
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1); 
-                #if DEBUG 
+                res = read(fd,&buf[2],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[2]);
                 #endif
                 if(buf[2] == I_0 || buf[2] == I_1)
@@ -347,8 +347,8 @@ int llread(unsigned char* packet) {
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1); 
-                #if DEBUG 
+                res = read(fd,&buf[3],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[3]);
                 #endif
                 if(buf[3] == buf[2]^buf[1])
@@ -358,7 +358,7 @@ int llread(unsigned char* packet) {
                 else
                     state = 1;
             break;
-            case 5:                
+            case 5:
                 while(1) {
                     res = read(fd,&buf[4],1);
                     #if DEBUG
@@ -395,7 +395,7 @@ int llread(unsigned char* packet) {
                     state = 1;
                 }
 
-                #if DEBUG 
+                #if DEBUG
                     printf("            [%d] parity %d\n",state,s);
                 #endif
                 buf[0] = FLAG;
@@ -416,11 +416,11 @@ int llread(unsigned char* packet) {
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
 int llclose(linkLayer connectionParameters, int showStatistics) {
-    #if DEBUG 
+    #if DEBUG
         printf("[linklayer] llclose() closing socket\n");
     #endif
 
-    int res; 
+    int res;
     unsigned char buf[5];
 
     if(connectionParameters.role == 0) {
@@ -441,15 +441,15 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
         switch(state) {
             case 1:
                 res = read(fd,&buf[0],1);
-                #if DEBUG 
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[0]);
                 #endif
                 if(buf[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1); 
-                #if DEBUG 
+                res = read(fd,&buf[1],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[1]);
                 #endif
                 if(buf[1] == 0x01)
@@ -460,8 +460,8 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1); 
-                #if DEBUG 
+                res = read(fd,&buf[2],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[2]);
                 #endif
                 if(buf[2] == DISC || buf[2] == UA)
@@ -472,8 +472,8 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1); 
-                #if DEBUG 
+                res = read(fd,&buf[3],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[3]);
                 #endif
                 if(buf[3] == buf[2]^buf[1])
@@ -484,8 +484,8 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
                     state = 1;
             break;
             case 5:
-                res = read(fd,&buf[4],1); 
-                #if DEBUG 
+                res = read(fd,&buf[4],1);
+                #if DEBUG
                     printf("            [%d] <-- %02x\n",state,buf[4]);
                 #endif
                 if(buf[4] != FLAG)
