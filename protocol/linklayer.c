@@ -20,7 +20,7 @@
 #define I_1  0xc0
 #define I_XOR 0x40
 
-#define FRAME_MAX_SIZE 1000
+#define FRAME_MAX_SIZE 1024
 
 /*
  * File Descriptor is not present on struct linklayer {}, so we have to 
@@ -200,6 +200,9 @@ int llwrite(unsigned char* buf, int bufSize) {
 
         frame[frameSize] = buf[buf_position];
         buf_position++;
+
+        if(buf_position >= bufSize)
+            break;
     }
     frame[frameSize] = bcc2;
     frameSize++;
@@ -385,7 +388,7 @@ int llread(unsigned char* packet) {
                 if(data_buf[n_data_buf] == bcc2_local || (I_XOR & buf[2] == s) ) {
                     buf[2] = s ? RR_1 : RR_0;
                     s = !s; // change parity
-                    strcpy(packet,data_buf);
+                    strncpy(packet,data_buf,n_data_buf);
                     state = 0;
                 } else {
                     buf[2] = s ? REJ_1 : REJ_0;
@@ -408,7 +411,7 @@ int llread(unsigned char* packet) {
         }
     }
 
-    return 1;
+    return n_data_buf;
 };
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close

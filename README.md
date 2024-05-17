@@ -1,12 +1,17 @@
-# RCOM Laboratory 3 Folder Structure
+# RCOM Laboratory 3 
+
+## Folder Structure
 
 ```
 .
-├── example_code                    # Example files in c
-│   └── ...
-├── milestones
-│   └── connection_state_machine.c  # First Milestone, logic / connection establishment
+├── app                 # Application layer
+│   └── main.c
+├── cable               # Virtual serial port
+│   └── cable.c
+├── makefile
+├── penguin.gif         # File to be transmitted through the linklayer
+├── protocol            # Link layer
+│   ├── linklayer.c
+│   └── linklayer.h
 └── README.md
 ```
-
-
