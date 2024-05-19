@@ -420,7 +420,8 @@ int llread(unsigned char* packet) {
                 if(frame[frame_size - 2] == bcc2_local) {
                     buf[2] = s ? RR_1 : RR_0;
                     s = !s; // change parity
-                    strncpy(packet,frame + 4,frame_size - 6);
+                    for(int i = 4; i < frame_size - 2; i++)
+                        packet[i - 4] = frame[i];
                     state = 0;
                 } else {
                     buf[2] = s ? REJ_1 : REJ_0;
