@@ -15,11 +15,11 @@ fi
 
 case $1 in
     tx)
-        ./bin/main /dev/ttyS10 tx penguin.gif
+        valgrind --track-origins=yes --leak-check=yes ./bin/main /dev/ttyS10 tx penguin.gif
     ;;
 
     rx)
-        ./bin/main /dev/ttyS11 rx penguin-received.gif
+        valgrind --track-origins=yes --leak-check=yes ./bin/main /dev/ttyS11 rx penguin-received.gif
     ;;
 
     cable)

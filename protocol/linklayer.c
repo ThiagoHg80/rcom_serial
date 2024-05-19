@@ -5,6 +5,8 @@
 #endif
 
 #define FLAG 0x5c
+#define A_tx 0x01
+#define A_rx 0x03
 #define SET  0x07
 #define DISC 0x0a
 #define UA   0x06
@@ -20,15 +22,34 @@
 #define I_1  0xc0
 #define I_XOR 0x40
 
-#define FRAME_MAX_SIZE 1024
+#define FRAME_MAX_SIZE 2048
 
 /*
- * File Descriptor is not present on struct linklayer {}, so we have to 
+ * File Descriptor is not present on struct linklayer {}, so we have to
  * create a global variable for it
- * Given that: This API can't handle two open connections at the same time 
+ * Given that: This API can't handle two open connections at the same time
  */
 static int fd, s = 0;
 static struct termios oldtio,newtio;
+
+static int stats_transmitted_bytes = 0;
+static int stats_aux_escaped_bytes = 0;
+static int stats_received_bytes = 0;
+
+#if DEBUG
+    static int bcc2_tracker = 0;
+#endif
+
+static void bytestuff(unsigned char byte, unsigned char *frame, int *n) {
+    if(byte == FLAG || byte == ESC) {
+        frame[(*n)++] = ESC;
+        frame[(*n)++] = byte ^ ESC_XOR;
+        stats_aux_escaped_bytes++;
+    } else {
+        frame[(*n)++] = byte;
+    }
+    return;
+}
 
 // Opens a conection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters) {
@@ -166,7 +187,7 @@ int llwrite(unsigned char* buf, int bufSize) {
     int res;
 
     // TODO: Implement FRAME into function?
-    int buf_position, frameSize;
+    int frame_size;
     unsigned char bcc2, frame[FRAME_MAX_SIZE];
     // Frame
     frame[0] = FLAG;
@@ -178,35 +199,29 @@ int llwrite(unsigned char* buf, int bufSize) {
         printf("            [1] parity %d\n",s);
     #endif
 
-    buf_position = 0;
-    frameSize = 4;
+    frame_size = 4;
     bcc2 = 0;
-    for(; frameSize < FRAME_MAX_SIZE - 2; frameSize++) {
-        // The generation of BCC considers only the original octets (before stuffing)
-        bcc2 = bcc2 ^ buf[buf_position];
-
-        // Byte Stuffing
-        if(buf[buf_position] == FLAG || buf[buf_position] == ESC) {
-            // Check for the very specific case where you're escaping a character
-            // at position FRAME_MAX_SIZE - 3 (you only have ony byte left to use in the frame)
-            if(frameSize == FRAME_MAX_SIZE - 3) {
-                bcc2 = bcc2 ^ buf[buf_position]; // Remove octet from BCC
-                break;
-            }
-            frame[frameSize] = ESC;
-            frameSize++;
-            frame[frameSize] = buf[buf_position]^ESC_XOR;
-        }
-
-        frame[frameSize] = buf[buf_position];
-        buf_position++;
-
-        if(buf_position >= bufSize)
-            break;
+    #if DEBUG
+        printf("            [1] constructing packet");
+        printf("            [1] %02x %02x %02x %02x --> \n",frame[0],frame[1],frame[2],frame[3]);
+    #endif
+    for(int i = 0; i < bufSize; i++) {
+        bcc2 = bcc2 ^ buf[i]; // The generation of BCC considers only the original octets (before stuffing)
+        bytestuff(buf[i],frame,&frame_size);
+        #if DEBUG
+            if(buf[i] == FLAG || buf[i] == ESC)
+                printf("ESCAPE ");
+            printf("%02x(%02x) ",frame[frame_size - 1], bcc2);
+            if((frame_size - 4) % 16 == 0)
+                printf("\n");
+        #endif
     }
-    frame[frameSize] = bcc2;
-    frameSize++;
-    frame[frameSize] = FLAG;
+    #if DEBUG
+        printf("%02x %02x\n",bcc2,FLAG);
+    #endif
+    bytestuff(bcc2,frame,&frame_size);
+
+    frame[frame_size++] = FLAG;
 
     int state = 11;
     int rej_counter = 0;
@@ -216,14 +231,9 @@ int llwrite(unsigned char* buf, int bufSize) {
         sleep(0.1);
         switch(state) {
             case 11:
-                res = write(fd,frame,frameSize+1);
+                res = write(fd,frame,frame_size);
                 #if DEBUG
-                    printf("            [1] %02x %02x %02x %02x --> \n",frame[0],frame[1],frame[2],frame[3]);
-                    printf("            [1] sending %d bytes of data\n",frameSize + 1);
-                    for(int i = 4; i < frameSize+1; i++) {
-                        printf("%02x ",frame[i]);
-                    }
-                    printf("\n");
+                    printf("            [1] sending %d bytes of data\n",frame_size - 6);
                 #endif
                 rej_counter++;
                 if(rej_counter > 5) {
@@ -261,6 +271,7 @@ int llwrite(unsigned char* buf, int bufSize) {
                 }
                 else if(control_buf[2] == REJ_0 || control_buf[2] == REJ_1) { // (frame[2] == I_0 ? REJ_0 : REJ_1) // Should this be used ?
                     state = 11; // Retransmission
+                    // TODO: Change to state 11 only after receiving the full control packet
                     #if DEBUG
                         printf("            [%d] Retransmitting data\n",state);
                     #endif
@@ -298,6 +309,8 @@ int llwrite(unsigned char* buf, int bufSize) {
         }
     }
 
+    stats_transmitted_bytes += frame_size - 6 - stats_aux_escaped_bytes;
+    stats_aux_escaped_bytes = 0;
     return 1;
 };
 
@@ -307,88 +320,107 @@ int llread(unsigned char* packet) {
         printf("[linklayer] llread() reading socket data\n");
     #endif
     int res;
-    size_t n_data_buf = 0;
-    unsigned char buf[6], data_buf[FRAME_MAX_SIZE];
+    size_t frame_size = 0;
+    unsigned char buf[6], frame[FRAME_MAX_SIZE];
 
     int state = 1;
     while(state) {
         sleep(0.1);
         switch(state) {
             case 1:
-                res = read(fd,&buf[0],1);
+                res = read(fd,&frame[0],1);
                 #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[0]);
+                    printf("            [%d] <-- %02x\n",state,frame[0]);
                 #endif
-                if(buf[0] == FLAG)
+                if(frame[0] == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1);
+                res = read(fd,&frame[1],1);
                 #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[1]);
+                    printf("            [%d] <-- %02x\n",state,frame[1]);
                 #endif
-                if(buf[1] == 0x01)
+                if(frame[1] == 0x01)
                     state = 3;
-                else if(buf[1] == FLAG)
+                else if(frame[1] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1);
+                res = read(fd,&frame[2],1);
                 #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[2]);
+                    printf("            [%d] <-- %02x\n",state,frame[2]);
                 #endif
-                if(buf[2] == I_0 || buf[2] == I_1)
+                if( (s == 0)*(frame[2] == I_0) || (s == 1)*(frame[2] == I_1) )
                     state = 4;
-                else if(buf[2] == FLAG)
+                else if(frame[2] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1);
+                res = read(fd,&frame[3],1);
                 #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[3]);
+                    printf("            [%d] <-- %02x\n",state,frame[3]);
                 #endif
-                if(buf[3] == buf[2]^buf[1])
+                if(frame[3] == frame[2]^frame[1])
                     state = 5;
-                else if(buf[3] == FLAG)
+                else if(frame[3] == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 5:
+                frame_size = 4;
+                #if DEBUG
+                    bcc2_tracker = 0;
+                #endif
                 while(1) {
-                    res = read(fd,&buf[4],1);
-                    #if DEBUG
-                        printf("%02x ",buf[4]);
-                    #endif
-                    if(buf[4] == ESC) { // byte destuffing
-                        res = read(fd,&buf[5],1);
-                        buf[4] = buf[5]^ESC_XOR;
-                    } else if(buf[4] == FLAG) { // end-of-frame
+                    res = read(fd,&frame[frame_size++],1);
+
+                    if(frame[frame_size - 1] == ESC) { // byte destuffing (note that this also destuff bcc2)
+                        #if DEBUG
+                            printf("ESCAPE ");
+                        #endif
+                        res = read(fd,&frame[frame_size - 1],1);
+                        frame[frame_size - 1] ^= ESC_XOR;
+                    } else if(frame[frame_size - 1] == FLAG) { // end-of-frame
                         state = 6;
-                        n_data_buf--;
+                        #if DEBUG
+                            printf("%02x \n",FLAG);
+                        #endif
                         break;
                     }
-                    data_buf[n_data_buf] = buf[4];
-                    n_data_buf++;
+
+                    #if DEBUG
+                        bcc2_tracker ^= frame[frame_size - 1];
+                        printf("%02x(%02x) ",frame[frame_size - 1],bcc2_tracker);
+                        if((frame_size - 4) % 16 == 0)
+                            printf("\n");
+                    #endif
                 }
             break;
             case 6:
+                /*
+                    FLAG(0) A(1) C(2) BCC1(3)
+                    D1(4) D2(5) D3(6) ... DN
+                    BCC2(K-2) FLAG(K-1)
+
+                    data_size = frame_size - 6
+                */
                 unsigned char bcc2_local = 0;
-                for(int i = 0; i < n_data_buf; i++) {
-                    bcc2_local = bcc2_local ^ data_buf[i];
+                for(int i = 4; i < frame_size - 2; i++) {
+                    bcc2_local ^= frame[i];
                 }
                 #if DEBUG
-                    printf("\n            [%d] received %02x and expected %02x\n",state,bcc2_local, data_buf[n_data_buf]);
+                    printf("\n            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
                 #endif
 
-                if(data_buf[n_data_buf] == bcc2_local || (I_XOR & buf[2] == s) ) {
+                if(frame[frame_size - 2] == bcc2_local) {
                     buf[2] = s ? RR_1 : RR_0;
                     s = !s; // change parity
-                    strncpy(packet,data_buf,n_data_buf);
+                    strncpy(packet,frame + 4,frame_size - 6);
                     state = 0;
                 } else {
                     buf[2] = s ? REJ_1 : REJ_0;
@@ -411,7 +443,8 @@ int llread(unsigned char* packet) {
         }
     }
 
-    return n_data_buf;
+    stats_received_bytes += frame_size - 6;
+    return frame_size - 6;
 };
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
@@ -517,5 +550,11 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
         exit(-1);
     }
     close(fd);
+
+    if(showStatistics) {
+        printf("[linklayer] llclose() statistics\n");
+        printf("            bytes received: %d\n", stats_received_bytes);
+        printf("            bytes sent: %d\n", stats_transmitted_bytes);
+    }
     return 1;
 };
