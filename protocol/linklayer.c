@@ -22,14 +22,14 @@
 #define I_1  0xc0
 #define I_XOR 0x40
 
-#define FRAME_MAX_SIZE 2048
+#define FRAME_MAX_SIZE 2007 // Worst case scenario frame size
 
 /*
  * File Descriptor is not present on struct linklayer {}, so we have to
  * create a global variable for it
  * Given that: This API can't handle two open connections at the same time
  */
-static int fd, s = 0;
+static int fd, res, s = 0, num_tries = MAX_RETRANSMISSIONS_DEFAULT, time_out = TIMEOUT_DEFAULT;
 static struct termios oldtio,newtio;
 
 static int stats_transmitted_bytes = 0;
@@ -57,8 +57,13 @@ int llopen(linkLayer connectionParameters) {
         printf("[linklayer] llopen() opening socket\n");
     #endif
 
-    int res;
     unsigned char buf[5];
+
+    if(connectionParameters.timeOut)
+        time_out = connectionParameters.timeOut;
+
+    if(connectionParameters.numTries)
+        num_tries = connectionParameters.numTries;
 
     fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
     if (fd < 0) { perror(connectionParameters.serialPort); exit(-1); }
@@ -95,14 +100,6 @@ int llopen(linkLayer connectionParameters) {
         #endif
     }
 
-   /* State Machine
-     * 0 STOP
-     * 1 Start
-     * 2 FLAG_RCV
-     * 3 A_RCV
-     * 4 C_RCV
-     * 5 BCC OK
-     */
     int state = 1;
     while(state) {
         sleep(0.1);
@@ -224,7 +221,7 @@ int llwrite(unsigned char* buf, int bufSize) {
     frame[frame_size++] = FLAG;
 
     int state = 11;
-    int rej_counter = 0;
+    int transmission_counter = 0;
 
     unsigned char control_buf[6];
     while(state) {
@@ -235,9 +232,9 @@ int llwrite(unsigned char* buf, int bufSize) {
                 #if DEBUG
                     printf("            [1] sending %d bytes of data\n",frame_size - 6);
                 #endif
-                rej_counter++;
-                if(rej_counter > 5) {
-                    state = 0;
+                transmission_counter++;
+                if(transmission_counter > num_tries) {
+                    return -1;
                 } else {
                     state = 1;
                 }
