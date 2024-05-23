@@ -40,6 +40,11 @@ static int stats_received_bytes = 0;
     static int bcc2_tracker = 0;
 #endif
 
+// static int read_timeout(unsigned char *byte, int timeout) {
+//     int res, timer = 0;
+//     while(res = read(fd,&byte,timeout) < 0) {}
+// }
+
 static ssize_t send_cframe(unsigned char A,unsigned char C) {
     unsigned char buf[5] = {FLAG, A, C, A^C, FLAG};
     #if DEBUG
@@ -335,26 +340,25 @@ int llread(unsigned char* packet) {
                 printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
                 #endif
 
-                if(byte == (address_byte^control_byte)) {
+                if(byte != (address_byte^control_byte)) {
                     state = 1;
                     break;
                 }
 
-                frame_size = 4;
                 #if DEBUG
                 bcc2_tracker = 0;
                 printf("            [%d] reading frame\n",state);
                 #endif
-                while(1) {
-                    res = read(fd,&frame[frame_size++],1);
+                for(frame_size = 0; frame_size < FRAME_MAX_SIZE; frame_size++) {
+                    read(fd,&frame[frame_size],1);
 
-                    if(frame[frame_size - 1] == ESC) { // byte destuffing (note that this also destuff bcc2)
+                    if(frame[frame_size] == ESC) { // byte destuffing (note that this also destuff bcc2)
                         #if DEBUG
                         printf("ESCAPE ");
                         #endif
-                        res = read(fd,&frame[frame_size - 1],1);
-                        frame[frame_size - 1] ^= ESC_XOR;
-                    } else if(frame[frame_size - 1] == FLAG) { // end-of-frame
+                        res = read(fd,&frame[frame_size],1);
+                        frame[frame_size] ^= ESC_XOR;
+                    } else if(frame[frame_size] == FLAG) { // end-of-frame
                         #if DEBUG
                         printf("%02x \n",FLAG);
                         #endif
@@ -362,8 +366,8 @@ int llread(unsigned char* packet) {
                     }
 
                     #if DEBUG
-                    bcc2_tracker ^= frame[frame_size - 1];
-                    printf("%02x(%02x) ",frame[frame_size - 1],bcc2_tracker);
+                    bcc2_tracker ^= frame[frame_size];
+                    printf("%02x(%02x) ",frame[frame_size],bcc2_tracker);
                     if((frame_size - 4) % 16 == 0)
                         printf("\n");
                     #endif
@@ -372,34 +376,34 @@ int llread(unsigned char* packet) {
                 printf("\n            [%d] finished reading frame\n",state);
                 #endif
                 unsigned char bcc2_local = 0;
-                for(int i = 4; i < frame_size - 2; i++) {
+                for(int i = 0; i < frame_size - 1; i++) {
                     bcc2_local ^= frame[i];
                 }
                 #if DEBUG
-                printf("            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
+                printf("            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 1]);
                 #endif
 
-                if(frame[frame_size - 2] == bcc2_local) {
-                    buf[2] = s ? RR_1 : RR_0;
+                if(frame[frame_size - 1] == bcc2_local) {
+                    control_byte = s ? RR_1 : RR_0;
                     s = !s; // change parity
-                    for(int i = 4; i < frame_size - 2; i++)
-                        packet[i - 4] = frame[i];
+                    for(int i = 0; i < frame_size - 1; i++)
+                        packet[i] = frame[i];
                     state = 0;
                 } else {
-                    buf[2] = s ? REJ_1 : REJ_0;
+                    control_byte = s ? REJ_1 : REJ_0;
                     state = 1;
                 }
 
                 #if DEBUG
                     printf("            [%d] parity %d\n",state,s);
                 #endif
-                send_cframe(A_TX,buf[2]);
+                send_cframe(address_byte,control_byte);
             break;
         }
     }
 
-    stats_received_bytes += frame_size - 6;
-    return frame_size - 6;
+    stats_received_bytes += frame_size - 1;
+    return frame_size - 1;
 };
 
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
