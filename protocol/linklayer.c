@@ -62,7 +62,7 @@ static void bytestuff(unsigned char byte, unsigned char *frame, int *n) {
 // Opens a conection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters) {
     #if DEBUG
-        printf("[linklayer] llopen() opening socket\n");
+    printf("[linklayer] llopen() opening socket\n");
     #endif
 
     unsigned char buf[5];
@@ -133,6 +133,9 @@ int llopen(linkLayer connectionParameters) {
                     state = 1;
             break;
             case 4:
+                #if DEBUG
+                printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
+                #endif
                 if(byte == address_byte^control_byte)
                     state = 5;
                 else if(byte == FLAG)
@@ -158,124 +161,114 @@ int llopen(linkLayer connectionParameters) {
 // Sends data in buf with size bufSize
 int llwrite(unsigned char* buf, int bufSize) {
     #if DEBUG
-        printf("[linklayer] llwrite() write data to socket\n");
+    printf("[linklayer] llwrite() write data to socket\n");
     #endif
-    int res;
 
-    // TODO: Implement FRAME into function?
+    // Populate frame array
     int frame_size;
     unsigned char bcc2, frame[FRAME_MAX_SIZE];
-    // Frame
     frame[0] = FLAG;
-    frame[1] = 0x01;
+    frame[1] = A_TX;
     frame[2] = s ? I_1 : I_0;
     frame[3] = frame[1]^frame[2];
 
     #if DEBUG
-        printf("            [1] parity %d\n",s);
+    printf("            [1] parity %d\n",s);
+    printf("            [1] constructing packet");
+    printf("            [1] %02x %02x %02x %02x --> \n",frame[0],frame[1],frame[2],frame[3]);
     #endif
 
     frame_size = 4;
     bcc2 = 0;
-    #if DEBUG
-        printf("            [1] constructing packet");
-        printf("            [1] %02x %02x %02x %02x --> \n",frame[0],frame[1],frame[2],frame[3]);
-    #endif
     for(int i = 0; i < bufSize; i++) {
         bcc2 = bcc2 ^ buf[i]; // The generation of BCC considers only the original octets (before stuffing)
         bytestuff(buf[i],frame,&frame_size);
         #if DEBUG
-            if(buf[i] == FLAG || buf[i] == ESC)
-                printf("ESCAPE ");
-            printf("%02x(%02x) ",frame[frame_size - 1], bcc2);
-            if((frame_size - 4) % 16 == 0)
-                printf("\n");
+        if(buf[i] == FLAG || buf[i] == ESC)
+        printf("ESCAPE ");
+        printf("%02x(%02x) ",frame[frame_size - 1], bcc2);
+        if((frame_size - 4) % 16 == 0)
+            printf("\n");
         #endif
     }
+
     #if DEBUG
-        printf("%02x %02x\n",bcc2,FLAG);
+    printf("%02x %02x\n",bcc2,FLAG);
     #endif
     bytestuff(bcc2,frame,&frame_size);
-
     frame[frame_size++] = FLAG;
 
-    int state = 11;
-    int transmission_counter = 0;
+    // Send frame
+    res = write(fd,frame,frame_size);
+    #if DEBUG
+    printf("            [1] sending %d bytes of data\n",frame_size - 6);
+    #endif
 
-    unsigned char control_buf[6];
+    // Start state machine
+    int state = 1;
+    int retransmission_counter = 0;
+    unsigned char byte = 0, address_byte = 0, control_byte = 0;
     while(state) {
         sleep(0.1);
+        read(fd,&byte,1);
+        #if DEBUG
+        printf("            [%d] <-- %02x\n",state,byte);
+        #endif
         switch(state) {
-            case 11:
-                res = write(fd,frame,frame_size);
-                #if DEBUG
-                    printf("            [1] sending %d bytes of data\n",frame_size - 6);
-                #endif
-                transmission_counter++;
-                if(transmission_counter > num_tries) {
-                    return -1;
-                } else {
-                    state = 1;
-                }
             case 1:
-                res = read(fd,&control_buf[0],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,control_buf[0]);
-                #endif
-                if(control_buf[0] == FLAG)
+                if(byte == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&control_buf[1],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,control_buf[1]);
-                #endif
-                if(control_buf[1] == 0x01)
+                if(byte == A_TX || byte == A_RX) {
+                    address_byte = byte;
                     state = 3;
-                else if(control_buf[1] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&control_buf[2],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,control_buf[2]);
-                #endif
-                if(control_buf[2] == (frame[2] == I_0 ? RR_0 : RR_1)) {
+                if(byte == FLAG) {
+                    state = 2;
+                    break;
+                }
+
+                if(byte == (frame[2] == I_0 ? RR_0 : RR_1)) {
+                    control_byte = byte;
                     state = 4;
                 }
-                else if(control_buf[2] == REJ_0 || control_buf[2] == REJ_1) { // (frame[2] == I_0 ? REJ_0 : REJ_1) // Should this be used ?
-                    state = 11; // Retransmission
-                    // TODO: Change to state 11 only after receiving the full control packet
+                else if(byte == (frame[2] == I_0 ? REJ_0 : REJ_1)) {
+                    // TODO: Retransmit only after receiving the full control packet
+                    control_byte = byte;
+                    retransmission_counter++;
+                    if(retransmission_counter > num_tries)
+                        return -1;
+
+                    res = write(fd,frame,frame_size);
                     #if DEBUG
-                        printf("            [%d] Retransmitting data\n",state);
+                    printf("            [%d] Retransmitting %d bytes of data\n",state, frame_size - 6);
                     #endif
-                } else if(control_buf[2] == FLAG) {
-                    state = 2;
+
+                    state = 1;
                 } else {
                     state = 1;
                 }
             break;
             case 4:
-                res = read(fd,&control_buf[3],1);
                 #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,control_buf[3]);
-                    printf("            [%d] received %02x and expected %02x\n",state,control_buf[3],control_buf[2]^control_buf[1]);
+                printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
                 #endif
-                if(control_buf[3] == control_buf[2]^control_buf[1])
+                if(byte == address_byte^control_byte)
                     state = 5;
-                else if(control_buf[3] == FLAG)
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 5:
-                res = read(fd,&control_buf[4],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,control_buf[4]);
-                #endif
-                if(control_buf[4] == FLAG) {
+                if(byte == FLAG) {
                     s = !s; // change parity
                     state = 0;
                 }
@@ -293,7 +286,7 @@ int llwrite(unsigned char* buf, int bufSize) {
 // Receive data in packet
 int llread(unsigned char* packet) {
     #if DEBUG
-        printf("[linklayer] llread() reading socket data\n");
+    printf("[linklayer] llread() reading socket data\n");
     #endif
     int res;
     size_t frame_size = 0;
@@ -357,7 +350,7 @@ int llread(unsigned char* packet) {
 
                     if(frame[frame_size - 1] == ESC) { // byte destuffing (note that this also destuff bcc2)
                         #if DEBUG
-                            printf("ESCAPE ");
+                        printf("ESCAPE ");
                         #endif
                         res = read(fd,&frame[frame_size - 1],1);
                         frame[frame_size - 1] ^= ESC_XOR;
@@ -383,7 +376,7 @@ int llread(unsigned char* packet) {
                     bcc2_local ^= frame[i];
                 }
                 #if DEBUG
-                    printf("\n            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
+                printf("\n            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
                 #endif
 
                 if(frame[frame_size - 2] == bcc2_local) {
@@ -412,7 +405,7 @@ int llread(unsigned char* packet) {
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
 int llclose(linkLayer connectionParameters, int showStatistics) {
     #if DEBUG
-        printf("[linklayer] llclose() closing socket\n");
+    printf("[linklayer] llclose() closing socket\n");
     #endif
 
     int res;
@@ -422,10 +415,10 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
         send_cframe(A_TX,DISC);
 
     int state = 1;
-    unsigned char byte = 0, addres_byte = 0, control_byte = 0;
+    unsigned char byte = 0, address_byte = 0, control_byte = 0;
     while(state) {
         sleep(0.1);
-        res = read(fd,&byte,1);
+        read(fd,&byte,1);
         switch(state) {
             case 1:
                 if(byte == FLAG)
@@ -433,7 +426,7 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
             break;
             case 2:
                 if(byte == A_TX || byte == A_RX) {
-                    addres_byte = byte;
+                    address_byte = byte;
                     state = 3;
                 }
                 else if(byte == FLAG)
@@ -452,8 +445,12 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
                     state = 1;
             break;
             case 4:
-                if(byte == addres_byte^control_byte)
+                if(byte == address_byte^control_byte) {
+                    #if DEBUG
+                    printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
+                    #endif
                     state = 5;
+                }
                 else if(byte == FLAG)
                     state = 2;
                 else
@@ -467,7 +464,7 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
 
                 if(control_byte == DISC) {
                     control_byte = connectionParameters.role == 0 ? UA : DISC;
-                    send_cframe(addres_byte,control_byte);
+                    send_cframe(address_byte,control_byte);
                     state = 1;
                 }
 
