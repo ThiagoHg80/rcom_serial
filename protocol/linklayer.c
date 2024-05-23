@@ -136,7 +136,7 @@ int llopen(linkLayer connectionParameters) {
                 #if DEBUG
                 printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
                 #endif
-                if(byte == address_byte^control_byte)
+                if(byte == (address_byte^control_byte))
                     state = 5;
                 else if(byte == FLAG)
                     state = 2;
@@ -260,7 +260,7 @@ int llwrite(unsigned char* buf, int bufSize) {
                 #if DEBUG
                 printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
                 #endif
-                if(byte == address_byte^control_byte)
+                if(byte == (address_byte^control_byte))
                     state = 5;
                 else if(byte == FLAG)
                     state = 2;
@@ -292,58 +292,58 @@ int llread(unsigned char* packet) {
     size_t frame_size = 0;
     unsigned char buf[6], frame[FRAME_MAX_SIZE];
 
+    unsigned char byte = 0, address_byte = 0, control_byte = 0;
     int state = 1;
     while(state) {
         sleep(0.1);
+        read(fd,&byte,1);
+        #if DEBUG
+        printf("            [%d] <-- %02x\n",state,byte);
+        #endif
         switch(state) {
             case 1:
-                res = read(fd,&frame[0],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,frame[0]);
-                #endif
-                if(frame[0] == FLAG)
+                if(byte == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&frame[1],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,frame[1]);
-                #endif
-                if(frame[1] == 0x01)
+                if(byte == A_TX || byte == A_RX) {
+                    address_byte = byte;
                     state = 3;
-                else if(frame[1] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&frame[2],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,frame[2]);
-                #endif
-                if( (s == 0)*(frame[2] == I_0) || (s == 1)*(frame[2] == I_1) )
+                if( ((s == 0) && (byte == I_0)) || ((s == 1) && (byte == I_1)) ) {
+                    control_byte = byte;
                     state = 4;
-                else if(frame[2] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 4:
-                res = read(fd,&frame[3],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,frame[3]);
-                #endif
-                if(frame[3] == frame[2]^frame[1])
-                    state = 5;
-                else if(frame[3] == FLAG)
+                if(byte == FLAG) {
                     state = 2;
-                else
+                    break;
+                }
+
+                #if DEBUG
+                printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
+                #endif
+
+                if(byte == (address_byte^control_byte)) {
                     state = 1;
-            break;
-            case 5:
+                    break;
+                }
+
                 frame_size = 4;
                 #if DEBUG
-                    bcc2_tracker = 0;
+                bcc2_tracker = 0;
+                printf("            [%d] reading frame\n",state);
                 #endif
                 while(1) {
                     res = read(fd,&frame[frame_size++],1);
@@ -355,28 +355,28 @@ int llread(unsigned char* packet) {
                         res = read(fd,&frame[frame_size - 1],1);
                         frame[frame_size - 1] ^= ESC_XOR;
                     } else if(frame[frame_size - 1] == FLAG) { // end-of-frame
-                        state = 6;
                         #if DEBUG
-                            printf("%02x \n",FLAG);
+                        printf("%02x \n",FLAG);
                         #endif
                         break;
                     }
 
                     #if DEBUG
-                        bcc2_tracker ^= frame[frame_size - 1];
-                        printf("%02x(%02x) ",frame[frame_size - 1],bcc2_tracker);
-                        if((frame_size - 4) % 16 == 0)
-                            printf("\n");
+                    bcc2_tracker ^= frame[frame_size - 1];
+                    printf("%02x(%02x) ",frame[frame_size - 1],bcc2_tracker);
+                    if((frame_size - 4) % 16 == 0)
+                        printf("\n");
                     #endif
                 }
-            break;
-            case 6:
+                #if DEBUG
+                printf("\n            [%d] finished reading frame\n",state);
+                #endif
                 unsigned char bcc2_local = 0;
                 for(int i = 4; i < frame_size - 2; i++) {
                     bcc2_local ^= frame[i];
                 }
                 #if DEBUG
-                printf("\n            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
+                printf("            [%d] received %02x and expected %02x\n",state,bcc2_local, frame[frame_size - 2]);
                 #endif
 
                 if(frame[frame_size - 2] == bcc2_local) {
@@ -445,7 +445,7 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
                     state = 1;
             break;
             case 4:
-                if(byte == address_byte^control_byte) {
+                if(byte == (address_byte^control_byte)) {
                     #if DEBUG
                     printf("            [%d] received %02x and expected %02x\n",state,byte,address_byte^control_byte);
                     #endif
