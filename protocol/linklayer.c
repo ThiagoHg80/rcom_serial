@@ -261,11 +261,11 @@ int llwrite(unsigned char* buf, int bufSize) {
         if(read_timeout(&byte) < 0) {
             retransmission_counter++;
             if(retransmission_counter > num_tries) {
-                stats.total_time += start - end;
-                if(start - end > stats.slowest_frame)
-                    stats.slowest_frame = start - end;
-                if(start - end < stats.fastest_frame)
-                    stats.fastest_frame = start - end;
+                stats.total_time += end - start;
+                if(end - start > stats.slowest_frame)
+                    stats.slowest_frame = end - start;
+                if(end - start < stats.fastest_frame)
+                    stats.fastest_frame = end - start;
                 return -1;
             }
 
@@ -345,11 +345,11 @@ int llwrite(unsigned char* buf, int bufSize) {
 
     stats.transmitted_bytes += frame_size - 2;
     end = time(0);
-    stats.total_time += start - end;
-    if(start - end > stats.slowest_frame)
-        stats.slowest_frame = start - end;
-    if(start - end < stats.fastest_frame)
-        stats.fastest_frame = start - end;
+    stats.total_time += end - start;
+    if(end - start > stats.slowest_frame)
+        stats.slowest_frame = end - start;
+    if(end - start < stats.fastest_frame)
+        stats.fastest_frame = end - start;
     return 1;
 };
 
@@ -476,11 +476,11 @@ int llread(unsigned char* packet) {
 
     stats.received_bytes += frame_size - 1;
     end = time(0);
-    stats.total_time += start - end;
-    if(start - end > stats.slowest_frame)
-        stats.slowest_frame = start - end;
-    if(start - end < stats.fastest_frame)
-        stats.fastest_frame = start - end;
+    stats.total_time += end - start;
+    if(end - start > stats.slowest_frame)
+        stats.slowest_frame = end - start;
+    if(end - start < stats.fastest_frame)
+        stats.fastest_frame = end - start;
     return frame_size - 1;
 };
 
