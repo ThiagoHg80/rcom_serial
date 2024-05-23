@@ -45,6 +45,10 @@ struct Statistics {
     int escaped_bytes;
     int transmitted_bytes;
     int received_bytes;
+    float total_time;
+    float average_frame_time;
+    float fastest_frame;
+    float slowest_frame;
 };
 
 static struct Statistics stats;
@@ -103,6 +107,11 @@ int llopen(linkLayer connectionParameters) {
     stats.escaped_bytes = 0;
     stats.transmitted_bytes = 0;
     stats.received_bytes = 0;
+
+    stats.average_frame_time = 0;
+    stats.total_time = 0;
+    stats.fastest_frame = -1;
+    stats.slowest_frame = 999999;
 
     fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
     if (fd < 0) { perror(connectionParameters.serialPort); exit(-1); }
@@ -542,15 +551,22 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
     if(showStatistics) {    
         printf("[linklayer] llclose() Statistics\n");
         printf("Baudrate:%d\n",connectionParameters.baudRate);
+        
         printf("            bytes received: %d\n", stats.received_bytes);
         printf("            bytes sent: %d\n", stats.transmitted_bytes);
         printf("            bytes escaped: %d\n", stats.escaped_bytes);
 
         printf("            trasmitted frames: %d\n", stats.transmitted_i_frames);
-        printf("            trasmitted rejected frames : %d\n", stats.transmitted_rej_frames);
+        printf("            trasmitted rejection frames : %d\n", stats.transmitted_rej_frames);
         
         printf("            received frames: %d\n", stats.received_i_frames);
-        printf("            received rejected frames : %d\n", stats.received_rej_frames);
+        printf("            received rejection frames : %d\n", stats.received_rej_frames);
+        
+        
+        printf("            Total Time : %f\n", stats.total_time);
+        printf("            fastest received frame : %f\n", stats.fastest_frame);
+        printf("            slowest received frame : %f\n", stats.slowest_frame);
+        printf("            average time for received frames : %f\n", stats.average_frame_time);
 
     }
     return 1;
