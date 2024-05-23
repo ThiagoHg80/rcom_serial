@@ -1,4 +1,5 @@
 #include "linklayer.h"
+#include <time.h>
 
 #ifndef DEBUG
 #define DEBUG 1
@@ -35,6 +36,7 @@
  */
 static int fd, res, s = 0, num_tries = MAX_RETRANSMISSIONS_DEFAULT, time_out = TIMEOUT_DEFAULT;
 static struct termios oldtio,newtio;
+time_t start,end;
 
 struct Statistics {
     int received_i_frames;
@@ -45,10 +47,10 @@ struct Statistics {
     int escaped_bytes;
     int transmitted_bytes;
     int received_bytes;
-    float total_time;
-    float average_frame_time;
-    float fastest_frame;
-    float slowest_frame;
+    time_t total_time;
+    time_t average_frame_time;
+    time_t fastest_frame;
+    time_t slowest_frame;
 };
 
 static struct Statistics stats;
@@ -110,8 +112,8 @@ int llopen(linkLayer connectionParameters) {
 
     stats.average_frame_time = 0;
     stats.total_time = 0;
-    stats.fastest_frame = -1;
-    stats.slowest_frame = 999999;
+    stats.fastest_frame = 9999999;
+    stats.slowest_frame = -1;
 
     fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
     if (fd < 0) { perror(connectionParameters.serialPort); exit(-1); }
@@ -206,6 +208,7 @@ int llopen(linkLayer connectionParameters) {
 
 // Sends data in buf with size bufSize
 int llwrite(unsigned char* buf, int bufSize) {
+    start = time(0);
     #if DEBUG
     printf("[linklayer] llwrite() write data to socket\n");
     #endif
@@ -257,8 +260,14 @@ int llwrite(unsigned char* buf, int bufSize) {
     while(state) {
         if(read_timeout(&byte) < 0) {
             retransmission_counter++;
-            if(retransmission_counter > num_tries)
+            if(retransmission_counter > num_tries) {
+                stats.total_time += start - end;
+                if(start - end > stats.slowest_frame)
+                    stats.slowest_frame = start - end;
+                if(start - end < stats.fastest_frame)
+                    stats.fastest_frame = start - end;
                 return -1;
+            }
 
             res = write(fd,frame,frame_size);
             stats.transmitted_i_frames++;
@@ -335,11 +344,18 @@ int llwrite(unsigned char* buf, int bufSize) {
     }
 
     stats.transmitted_bytes += frame_size - 2;
+    end = time(0);
+    stats.total_time += start - end;
+    if(start - end > stats.slowest_frame)
+        stats.slowest_frame = start - end;
+    if(start - end < stats.fastest_frame)
+        stats.fastest_frame = start - end;
     return 1;
 };
 
 // Receive data in packet
 int llread(unsigned char* packet) {
+    start = time(0);
     #if DEBUG
     printf("[linklayer] llread() reading socket data\n");
     #endif
@@ -459,6 +475,12 @@ int llread(unsigned char* packet) {
     }
 
     stats.received_bytes += frame_size - 1;
+    end = time(0);
+    stats.total_time += start - end;
+    if(start - end > stats.slowest_frame)
+        stats.slowest_frame = start - end;
+    if(start - end < stats.fastest_frame)
+        stats.fastest_frame = start - end;
     return frame_size - 1;
 };
 
@@ -548,6 +570,8 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
     }
     close(fd);
 
+    if(stats.received_i_frames)
+        stats.average_frame_time = stats.total_time / (stats.received_i_frames);
     if(showStatistics) {    
         printf("[linklayer] llclose() Statistics\n");
         printf("Baudrate:%d\n",connectionParameters.baudRate);
@@ -563,10 +587,10 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
         printf("            received rejection frames : %d\n", stats.received_rej_frames);
         
         
-        printf("            Total Time : %f\n", stats.total_time);
-        printf("            fastest received frame : %f\n", stats.fastest_frame);
-        printf("            slowest received frame : %f\n", stats.slowest_frame);
-        printf("            average time for received frames : %f\n", stats.average_frame_time);
+        printf("            Total Time : %ld\n", stats.total_time);
+        printf("            fastest received frame : %ld\n", stats.fastest_frame);
+        printf("            slowest received frame : %ld\n", stats.slowest_frame);
+        printf("            average time for received frames : %ld\n", stats.average_frame_time);
 
     }
     return 1;
