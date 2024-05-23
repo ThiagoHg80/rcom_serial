@@ -2,6 +2,11 @@
 
 # 1 - Ensure binaries exist
 
+if [ ! -d "bin/" ]; then
+    echo "Creating directory ./bin"
+    mkdir bin
+fi
+
 APP_BINARY_PATH="./bin/main"
 CABLE_BINARY_PATH="./bin/cable"
 

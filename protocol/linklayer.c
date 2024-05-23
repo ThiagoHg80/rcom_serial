@@ -5,8 +5,8 @@
 #endif
 
 #define FLAG 0x5c
-#define A_tx 0x01
-#define A_rx 0x03
+#define A_TX 0x01
+#define A_RX 0x03
 #define SET  0x07
 #define DISC 0x0a
 #define UA   0x06
@@ -39,6 +39,14 @@ static int stats_received_bytes = 0;
 #if DEBUG
     static int bcc2_tracker = 0;
 #endif
+
+static ssize_t send_cframe(unsigned char A,unsigned char C) {
+    unsigned char buf[5] = {FLAG, A, C, A^C, FLAG};
+    #if DEBUG
+    printf("            [send_cframe] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
+    #endif
+    return write(fd,buf,5);
+}
 
 static void bytestuff(unsigned char byte, unsigned char *frame, int *n) {
     if(byte == FLAG || byte == ESC) {
@@ -88,83 +96,54 @@ int llopen(linkLayer connectionParameters) {
         exit(-1);
     }
 
-    if(connectionParameters.role == 0) {
-        buf[0] = FLAG;
-        buf[1] = 0x01;
-        buf[2] = SET;
-        buf[3] = buf[1]^buf[2];
-        buf[4] = FLAG;
-        res = write(fd,buf,5);
-        #if DEBUG
-            printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
-        #endif
-    }
+    if(connectionParameters.role == 0)
+        send_cframe(A_TX,SET);
 
+    unsigned byte = 0, address_byte = 0, control_byte = 0;
     int state = 1;
     while(state) {
         sleep(0.1);
+        read(fd,&byte,1);
+        #if DEBUG
+        printf("            [%d] <-- %02x\n",state,byte);
+        #endif
         switch(state) {
             case 1:
-                res = read(fd,&buf[0],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[0]);
-                #endif
-                if(buf[0] == FLAG)
+                if(byte == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[1]);
-                #endif
-                if(buf[1] == 0x01)
+                if(byte == A_TX || byte == A_RX) {
+                    address_byte = byte;
                     state = 3;
-                else if(buf[1] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[2]);
-                #endif
-                if(buf[2] == SET || buf[2] == UA)
+                if(byte == SET || byte == UA) {
+                    control_byte = byte;
                     state = 4;
-                else if(buf[2] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[3]);
-                #endif
-                if(buf[3] == buf[2]^buf[1])
+                if(byte == address_byte^control_byte)
                     state = 5;
-                else if(buf[3] == FLAG)
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 5:
-                res = read(fd,&buf[4],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[4]);
-                #endif
-                if(buf[4] == FLAG) {
-                    if(buf[2] == SET) { // Answer SET with UA
-                        buf[0] = FLAG;
-                        buf[1] = 0x01;
-                        buf[2] = UA;
-                        buf[3] = buf[1]^buf[2];
-                        buf[4] = FLAG;
-                        res = write(fd,buf,5);
-                        #if DEBUG
-                            printf("            [5] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
-                        #endif
-                    }
+                if(byte == FLAG) {
+                    if(control_byte == SET) // Answer SET with UA
+                        send_cframe(address_byte,UA);
                     state = 0;
                 }
                 else
@@ -399,13 +378,6 @@ int llread(unsigned char* packet) {
                 }
             break;
             case 6:
-                /*
-                    FLAG(0) A(1) C(2) BCC1(3)
-                    D1(4) D2(5) D3(6) ... DN
-                    BCC2(K-2) FLAG(K-1)
-
-                    data_size = frame_size - 6
-                */
                 unsigned char bcc2_local = 0;
                 for(int i = 4; i < frame_size - 2; i++) {
                     bcc2_local ^= frame[i];
@@ -428,15 +400,7 @@ int llread(unsigned char* packet) {
                 #if DEBUG
                     printf("            [%d] parity %d\n",state,s);
                 #endif
-                buf[0] = FLAG;
-                buf[1] = 0x01;
-                buf[3] = buf[1]^buf[2];
-                buf[4] = FLAG;
-                res = write(fd,buf,5);
-                #if DEBUG
-                    printf("            [%d] %02x %02x %02x %02x %02x --> \n",state,buf[0],buf[1],buf[2],buf[3],buf[4]);
-                #endif
-
+                send_cframe(A_TX,buf[2]);
             break;
         }
     }
@@ -454,88 +418,60 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
     int res;
     unsigned char buf[5];
 
-    if(connectionParameters.role == 0) {
-        buf[0] = FLAG;
-        buf[1] = 0x01;
-        buf[2] = DISC;
-        buf[3] = buf[1]^buf[2];
-        buf[4] = FLAG;
-        res = write(fd,buf,5);
-        #if DEBUG
-            printf("            [1] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
-        #endif
-    }
+    if(connectionParameters.role == 0)
+        send_cframe(A_TX,DISC);
 
     int state = 1;
+    unsigned char byte = 0, addres_byte = 0, control_byte = 0;
     while(state) {
         sleep(0.1);
+        res = read(fd,&byte,1);
         switch(state) {
             case 1:
-                res = read(fd,&buf[0],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[0]);
-                #endif
-                if(buf[0] == FLAG)
+                if(byte == FLAG)
                     state = 2;
             break;
             case 2:
-                res = read(fd,&buf[1],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[1]);
-                #endif
-                if(buf[1] == 0x01)
+                if(byte == A_TX || byte == A_RX) {
+                    addres_byte = byte;
                     state = 3;
-                else if(buf[1] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 3:
-                res = read(fd,&buf[2],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[2]);
-                #endif
-                if(buf[2] == DISC || buf[2] == UA)
+                if(byte == DISC || byte == UA) {
+                    control_byte = byte;
                     state = 4;
-                else if(buf[2] == FLAG)
+                }
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 4:
-                res = read(fd,&buf[3],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[3]);
-                #endif
-                if(buf[3] == buf[2]^buf[1])
+                if(byte == addres_byte^control_byte)
                     state = 5;
-                else if(buf[3] == FLAG)
+                else if(byte == FLAG)
                     state = 2;
                 else
                     state = 1;
             break;
             case 5:
-                res = read(fd,&buf[4],1);
-                #if DEBUG
-                    printf("            [%d] <-- %02x\n",state,buf[4]);
-                #endif
-                if(buf[4] != FLAG)
+                if(byte != FLAG) {
+                    state = 1;
                     break;
+                }
 
-                if(buf[2] == DISC) {
-                    buf[0] = FLAG;
-                    buf[1] = 0x01;
-                    buf[2] = connectionParameters.role == 0 ? UA : DISC;
-                    buf[3] = buf[1]^buf[2];
-                    buf[4] = FLAG;
-                    res = write(fd,buf,5);
-                    #if DEBUG
-                        printf("            [5] %02x %02x %02x %02x %02x --> \n",buf[0],buf[1],buf[2],buf[3],buf[4]);
-                    #endif
+                if(control_byte == DISC) {
+                    control_byte = connectionParameters.role == 0 ? UA : DISC;
+                    send_cframe(addres_byte,control_byte);
                     state = 1;
                 }
 
-                if(buf[2] == UA) { // sent or received UA
+                if(control_byte == UA) { // sent or received UA
                     state = 0;
                 }
             break;
