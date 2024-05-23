@@ -4,6 +4,10 @@
 #define DEBUG 1
 #endif
 
+#ifndef RANDOM_ERROR_GENERATION
+#define RANDOM_ERROR_GENERATION 0
+#endif
+
 #define FLAG 0x5c
 #define A_TX 0x01
 #define A_RX 0x03
@@ -32,18 +36,31 @@
 static int fd, res, s = 0, num_tries = MAX_RETRANSMISSIONS_DEFAULT, time_out = TIMEOUT_DEFAULT;
 static struct termios oldtio,newtio;
 
-static int stats_transmitted_bytes = 0;
-static int stats_aux_escaped_bytes = 0;
-static int stats_received_bytes = 0;
+struct Statistics {
+    int received_i_frames;
+    int transmitted_i_frames;
+    int received_rej_frames;
+    int transmitted_rej_frames;
+    int timeout_counter;
+    int escaped_bytes;
+    int transmitted_bytes;
+    int received_bytes;
+};
+
+static struct Statistics stats;
 
 #if DEBUG
     static int bcc2_tracker = 0;
 #endif
 
-// static int read_timeout(unsigned char *byte, int timeout) {
-//     int res, timer = 0;
-//     while(res = read(fd,&byte,timeout) < 0) {}
-// }
+static float read_timeout(unsigned char *byte) {
+    float time = 0;
+    while(read(fd,byte,1) < 0 || time > time_out) {
+        time += 0.1;
+        sleep(0.1);
+    }
+    return time > time_out ? -1 : time;
+}
 
 static ssize_t send_cframe(unsigned char A,unsigned char C) {
     unsigned char buf[5] = {FLAG, A, C, A^C, FLAG};
@@ -57,7 +74,7 @@ static void bytestuff(unsigned char byte, unsigned char *frame, int *n) {
     if(byte == FLAG || byte == ESC) {
         frame[(*n)++] = ESC;
         frame[(*n)++] = byte ^ ESC_XOR;
-        stats_aux_escaped_bytes++;
+        stats.escaped_bytes++;
     } else {
         frame[(*n)++] = byte;
     }
@@ -77,6 +94,15 @@ int llopen(linkLayer connectionParameters) {
 
     if(connectionParameters.numTries)
         num_tries = connectionParameters.numTries;
+
+    stats.received_i_frames = 0;
+    stats.transmitted_i_frames = 0;
+    stats.received_rej_frames = 0;
+    stats.transmitted_rej_frames = 0;
+    stats.timeout_counter = 0;
+    stats.escaped_bytes = 0;
+    stats.transmitted_bytes = 0;
+    stats.received_bytes = 0;
 
     fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY );
     if (fd < 0) { perror(connectionParameters.serialPort); exit(-1); }
@@ -104,11 +130,17 @@ int llopen(linkLayer connectionParameters) {
     if(connectionParameters.role == 0)
         send_cframe(A_TX,SET);
 
-    unsigned byte = 0, address_byte = 0, control_byte = 0;
-    int state = 1;
+    unsigned char byte = 0, address_byte = 0, control_byte = 0;
+    int retrasmission_counter = 0, state = 1;
     while(state) {
-        sleep(0.1);
-        read(fd,&byte,1);
+        if(read_timeout(&byte) < 0) {
+            retrasmission_counter++;
+            if(retrasmission_counter > num_tries)
+                return -1;
+            if(connectionParameters.role == 0)
+                send_cframe(A_TX,SET);
+            state = 1;
+        }
         #if DEBUG
         printf("            [%d] <-- %02x\n",state,byte);
         #endif
@@ -214,11 +246,19 @@ int llwrite(unsigned char* buf, int bufSize) {
     int retransmission_counter = 0;
     unsigned char byte = 0, address_byte = 0, control_byte = 0;
     while(state) {
-        sleep(0.1);
-        read(fd,&byte,1);
-        #if DEBUG
-        printf("            [%d] <-- %02x\n",state,byte);
-        #endif
+        if(read_timeout(&byte) < 0) {
+            retransmission_counter++;
+            if(retransmission_counter > num_tries)
+                return -1;
+
+            res = write(fd,frame,frame_size);
+            stats.transmitted_i_frames++;
+            #if DEBUG
+            printf("            [%d] Retransmitting %d bytes of data\n",state, frame_size - 6);
+            #endif
+
+            state = 1;
+        }
         switch(state) {
             case 1:
                 if(byte == FLAG)
@@ -245,6 +285,7 @@ int llwrite(unsigned char* buf, int bufSize) {
                     state = 4;
                 }
                 else if(byte == (frame[2] == I_0 ? REJ_0 : REJ_1)) {
+                    stats.received_rej_frames++;
                     // TODO: Retransmit only after receiving the full control packet
                     control_byte = byte;
                     retransmission_counter++;
@@ -252,6 +293,7 @@ int llwrite(unsigned char* buf, int bufSize) {
                         return -1;
 
                     res = write(fd,frame,frame_size);
+                    stats.transmitted_i_frames++;
                     #if DEBUG
                     printf("            [%d] Retransmitting %d bytes of data\n",state, frame_size - 6);
                     #endif
@@ -283,8 +325,7 @@ int llwrite(unsigned char* buf, int bufSize) {
         }
     }
 
-    stats_transmitted_bytes += frame_size - 6 - stats_aux_escaped_bytes;
-    stats_aux_escaped_bytes = 0;
+    stats.transmitted_bytes += frame_size - 2;
     return 1;
 };
 
@@ -295,12 +336,11 @@ int llread(unsigned char* packet) {
     #endif
     int res;
     size_t frame_size = 0;
-    unsigned char buf[6], frame[FRAME_MAX_SIZE];
+    unsigned char frame[FRAME_MAX_SIZE];
 
     unsigned char byte = 0, address_byte = 0, control_byte = 0;
     int state = 1;
     while(state) {
-        sleep(0.1);
         read(fd,&byte,1);
         #if DEBUG
         printf("            [%d] <-- %02x\n",state,byte);
@@ -351,8 +391,13 @@ int llread(unsigned char* packet) {
                 #endif
                 for(frame_size = 0; frame_size < FRAME_MAX_SIZE; frame_size++) {
                     read(fd,&frame[frame_size],1);
-
+                    #if RANDOM_ERROR_GENERATION
+                    if(rand() % 200 == 0) {
+                        frame[frame_size] ^ 0x01; // Jam the first bit
+                    }
+                    #endif
                     if(frame[frame_size] == ESC) { // byte destuffing (note that this also destuff bcc2)
+                        stats.escaped_bytes++;
                         #if DEBUG
                         printf("ESCAPE ");
                         #endif
@@ -375,6 +420,7 @@ int llread(unsigned char* packet) {
                 #if DEBUG
                 printf("\n            [%d] finished reading frame\n",state);
                 #endif
+                stats.received_i_frames++;
                 unsigned char bcc2_local = 0;
                 for(int i = 0; i < frame_size - 1; i++) {
                     bcc2_local ^= frame[i];
@@ -390,6 +436,7 @@ int llread(unsigned char* packet) {
                         packet[i] = frame[i];
                     state = 0;
                 } else {
+                    stats.transmitted_rej_frames++;
                     control_byte = s ? REJ_1 : REJ_0;
                     state = 1;
                 }
@@ -402,7 +449,7 @@ int llread(unsigned char* packet) {
         }
     }
 
-    stats_received_bytes += frame_size - 1;
+    stats.received_bytes += frame_size - 1;
     return frame_size - 1;
 };
 
@@ -418,11 +465,17 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
     if(connectionParameters.role == 0)
         send_cframe(A_TX,DISC);
 
-    int state = 1;
+    int retransmission_counter = 0, state = 1;
     unsigned char byte = 0, address_byte = 0, control_byte = 0;
     while(state) {
-        sleep(0.1);
-        read(fd,&byte,1);
+        if(read_timeout(&byte) < 0) {
+            retransmission_counter++;
+            if(retransmission_counter > num_tries)
+                return -1;
+            if(connectionParameters.role == 0)
+                send_cframe(A_TX,DISC);
+            state = 1;
+        }
         switch(state) {
             case 1:
                 if(byte == FLAG)
@@ -486,10 +539,19 @@ int llclose(linkLayer connectionParameters, int showStatistics) {
     }
     close(fd);
 
-    if(showStatistics) {
-        printf("[linklayer] llclose() statistics\n");
-        printf("            bytes received: %d\n", stats_received_bytes);
-        printf("            bytes sent: %d\n", stats_transmitted_bytes);
+    if(showStatistics) {    
+        printf("[linklayer] llclose() Statistics\n");
+        printf("Baudrate:%d\n",connectionParameters.baudRate);
+        printf("            bytes received: %d\n", stats.received_bytes);
+        printf("            bytes sent: %d\n", stats.transmitted_bytes);
+        printf("            bytes escaped: %d\n", stats.escaped_bytes);
+
+        printf("            trasmitted frames: %d\n", stats.transmitted_i_frames);
+        printf("            trasmitted rejected frames : %d\n", stats.transmitted_rej_frames);
+        
+        printf("            received frames: %d\n", stats.received_i_frames);
+        printf("            received rejected frames : %d\n", stats.received_rej_frames);
+
     }
     return 1;
 };
